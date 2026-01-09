@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Upload, Image as ImageIcon, ExternalLink, RefreshCw, Search, Trash2, Replace } from "lucide-react";
+import { Upload, Image as ImageIcon, ExternalLink, RefreshCw, Search, Trash2, Replace, Lock } from "lucide-react";
 
 interface ArticleRow {
     id: string;
@@ -12,7 +12,13 @@ interface ArticleRow {
     created_at: string;
 }
 
+const ADMIN_PASSWORD = "mirrim2025"; // Simple password protection
+
 export default function AdminPage() {
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [passwordInput, setPasswordInput] = useState("");
+    const [authError, setAuthError] = useState(false);
+
     const [articles, setArticles] = useState<ArticleRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState<string | null>(null);
@@ -20,6 +26,24 @@ export default function AdminPage() {
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [activeTab, setActiveTab] = useState<'without' | 'with'>('without');
+
+    const handleLogin = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (passwordInput === ADMIN_PASSWORD) {
+            setIsAuthenticated(true);
+            setAuthError(false);
+            sessionStorage.setItem('admin_auth', 'true');
+        } else {
+            setAuthError(true);
+        }
+    };
+
+    // Check session on mount
+    useEffect(() => {
+        if (sessionStorage.getItem('admin_auth') === 'true') {
+            setIsAuthenticated(true);
+        }
+    }, []);
 
     const fetchArticles = async () => {
         setLoading(true);
@@ -136,6 +160,43 @@ export default function AdminPage() {
     const articlesWithImages = filteredArticles.filter(a => a.image_url && !a.image_url.includes('unsplash.com'));
 
     const displayedArticles = activeTab === 'without' ? articlesWithoutImages : articlesWithImages;
+
+    // Login form if not authenticated
+    if (!isAuthenticated) {
+        return (
+            <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+                <div className="w-full max-w-md">
+                    <div className="bg-card border border-border rounded-2xl p-8 shadow-xl">
+                        <div className="text-center mb-6">
+                            <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-full mb-4">
+                                <Lock className="w-8 h-8 text-primary" />
+                            </div>
+                            <h1 className="text-2xl font-bold">Admin Panel</h1>
+                            <p className="text-muted-foreground mt-1">Entrez le mot de passe pour continuer</p>
+                        </div>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <input
+                                type="password"
+                                value={passwordInput}
+                                onChange={(e) => setPasswordInput(e.target.value)}
+                                placeholder="Mot de passe"
+                                className="w-full px-4 py-3 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {authError && (
+                                <p className="text-red-500 text-sm">Mot de passe incorrect</p>
+                            )}
+                            <button
+                                type="submit"
+                                className="w-full px-4 py-3 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 transition-colors"
+                            >
+                                Connexion
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-background text-foreground p-6">
