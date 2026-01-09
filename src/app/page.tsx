@@ -1,65 +1,142 @@
-import Image from "next/image";
+"use client";
+
+import Header from "@/components/Header";
+import AdBanner from "@/components/AdBanner";
+import NewsCard from "@/components/NewsCard";
+import SourceFilter from "@/components/SourceFilter";
+import Footer from "@/components/Footer";
+import ArticleModal from "@/components/ArticleModal";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { formatTimeAgo } from "@/lib/utils";
+import { Article } from "@/lib/scraper";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 
 export default function Home() {
+  const searchParams = useSearchParams();
+  const currentLang = searchParams.get("lang") === "ar" ? "ar" : "fr";
+  const { t, isRTL } = useTranslation();
+
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
+
+  // Modal State
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  useEffect(() => {
+    // Scroll to top on language change or source change
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentLang, selectedSource]);
+
+  useEffect(() => {
+    async function getNews() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/news?lang=${currentLang}`);
+        const data = await res.json();
+        if (data.success) {
+          setArticles(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch news", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Reset selection when changing language
+    setSelectedSource(null);
+    getNews();
+  }, [currentLang]);
+
+  // Extract unique sources for the filter bar
+  const uniqueSources = Array.from(new Set(articles.map(a => a.source)));
+
+  const displayedArticles = selectedSource
+    ? articles.filter(a => a.source === selectedSource)
+    : articles;
+
+  const handleArticleClick = (article: Article) => {
+    setSelectedArticle(article);
+    setIsModalOpen(true);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main dir={isRTL ? 'rtl' : 'ltr'} className={`min-h-screen bg-muted/30 pb-20 ${isRTL ? 'text-right' : 'text-left'}`}>
+      <Header />
+
+      {/* Sticky Filter Bar */}
+      <SourceFilter
+        sources={uniqueSources}
+        selectedSource={selectedSource}
+        onSelectSource={setSelectedSource}
+      />
+
+      <div className="container mx-auto px-4 space-y-6">
+
+        <AdBanner />
+
+        {/* Dynamic Heading */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold tracking-tight text-foreground">
+            {t('topNews')}
+          </h2>
+          <span className="text-xs text-muted-foreground" suppressHydrationWarning>
+            {currentLang === 'ar' ? `آخر تحديث: ${formatTimeAgo(new Date().toISOString(), 'ar')}` : `Mise à jour : ${formatTimeAgo(new Date().toISOString(), 'fr')}`}
+          </span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* News Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {loading ? (
+            <p className="text-center col-span-full py-20 text-muted-foreground animate-pulse">
+              {currentLang === 'ar' ? "جار تحميل الأخبار..." : "Chargement des actualités..."}
+            </p>
+          ) : displayedArticles.length === 0 ? (
+            <p className="text-center col-span-full py-20 text-muted-foreground">
+              {currentLang === 'ar' ? "لا توجد أخبار" : "Aucun article trouvé pour cette source."}
+            </p>
+          ) : (
+            displayedArticles.flatMap((news, idx) => {
+              const card = (
+                <NewsCard
+                  key={`article-${idx}`}
+                  source={news.source}
+                  category={news.category || (currentLang === 'ar' ? "أخبار" : "Actualité")}
+                  title={news.title}
+                  excerpt={news.excerpt || (currentLang === 'ar' ? "اقرأ المزيد..." : "Cliquez pour lire l'article complet...")}
+                  timeAgo={formatTimeAgo(news.pubDate, currentLang)}
+                  imageUrl={news.imageUrl || "https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&auto=format&fit=crop&q=60"}
+                  onClick={() => handleArticleClick(news)}
+                />
+              );
+
+              // Insert an Ad every 6 articles (after index 5, 11, 17, ...)
+              if ((idx + 1) % 6 === 0 && idx > 0) {
+                return [
+                  card,
+                  <div key={`ad-${idx}`} className="col-span-full">
+                    <AdBanner />
+                  </div>
+                ];
+              }
+              return [card];
+            })
+          )}
         </div>
-      </main>
-    </div>
+
+      </div>
+
+      <Footer />
+
+      {/* Article Preview Modal */}
+      <ArticleModal
+        article={selectedArticle}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
+    </main>
   );
 }

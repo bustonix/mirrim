@@ -1,0 +1,14 @@
+{
+    "common": {
+        "news": "Actualité",
+        "readArticle": "Lire l'article",
+        "readOn": "Lire sur",
+        "previewNote": "Ceci est un aperçu. Cliquez ci-dessous pour lire l'article complet sur le site source.",
+        "advertising": "PUBLICITÉ",
+        "adSpaceAvailable": "Espace Publicitaire Disponible",
+        "designedBy": "Conçu par",
+        "topNews": "À la Une",
+        "allSources": "Tous",
+        "close": "Fermer"
+    }
+}

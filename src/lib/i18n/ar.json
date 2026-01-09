@@ -1,0 +1,14 @@
+{
+    "common": {
+        "news": "أخبار",
+        "readArticle": "قراءة المقال",
+        "readOn": "قراءة على",
+        "previewNote": "هذه معاينة. انقر أدناه لقراءة المقال الكامل على الموقع المصدر.",
+        "advertising": "إعلان",
+        "adSpaceAvailable": "مساحة إعلانية متاحة",
+        "designedBy": "صمم بواسطة",
+        "topNews": "أبرز الأخبار",
+        "allSources": "الكل",
+        "close": "إغلاق"
+    }
+}
