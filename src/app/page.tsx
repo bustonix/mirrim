@@ -12,7 +12,9 @@ import { formatTimeAgo } from "@/lib/utils";
 import { Article } from "@/lib/scraper";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
-export default function Home() {
+import { Suspense } from "react";
+
+function HomeContent() {
   const searchParams = useSearchParams();
   const currentLang = searchParams.get("lang") === "ar" ? "ar" : "fr";
   const { t, isRTL } = useTranslation();
@@ -138,5 +140,13 @@ export default function Home() {
         onClose={() => setIsModalOpen(false)}
       />
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }
