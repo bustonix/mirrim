@@ -27,6 +27,10 @@ export default function AdminPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [activeTab, setActiveTab] = useState<'without' | 'with'>('without');
 
+    // Bulk selection state
+    const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+
     const handleLogin = (e: React.FormEvent) => {
         e.preventDefault();
         if (passwordInput === ADMIN_PASSWORD) {
@@ -52,6 +56,7 @@ export default function AdminPage() {
             const data = await res.json();
             if (data.success) {
                 setArticles(data.articles);
+                setSelectedArticles(new Set()); // Reset selection
             }
         } catch (err) {
             console.error("Failed to fetch articles", err);
@@ -140,6 +145,11 @@ export default function AdminPage() {
             if (data.success) {
                 setMessage({ type: 'success', text: 'Article supprimé!' });
                 setArticles(prev => prev.filter(a => a.id !== articleId));
+                setSelectedArticles(prev => {
+                    const next = new Set(prev);
+                    next.delete(articleId);
+                    return next;
+                });
             } else {
                 setMessage({ type: 'error', text: data.error || 'Erreur lors de la suppression' });
             }
@@ -160,6 +170,54 @@ export default function AdminPage() {
     const articlesWithImages = filteredArticles.filter(a => a.image_url && !a.image_url.includes('unsplash.com'));
 
     const displayedArticles = activeTab === 'without' ? articlesWithoutImages : articlesWithImages;
+
+    // Bulk actions
+    const toggleSelectAll = () => {
+        if (selectedArticles.size === displayedArticles.length) {
+            setSelectedArticles(new Set());
+        } else {
+            setSelectedArticles(new Set(displayedArticles.map(a => a.id)));
+        }
+    };
+
+    const toggleSelect = (id: string) => {
+        const newSelected = new Set(selectedArticles);
+        if (newSelected.has(id)) {
+            newSelected.delete(id);
+        } else {
+            newSelected.add(id);
+        }
+        setSelectedArticles(newSelected);
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedArticles.size === 0) return;
+        if (!confirm(`Supprimer définitivement ces ${selectedArticles.size} articles ?`)) return;
+
+        setBulkDeleting(true);
+        setMessage(null);
+
+        try {
+            const res = await fetch('/api/admin/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ articleIds: Array.from(selectedArticles) })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                setMessage({ type: 'success', text: `${selectedArticles.size} articles supprimés avec succès!` });
+                setArticles(prev => prev.filter(a => !selectedArticles.has(a.id)));
+                setSelectedArticles(new Set());
+            } else {
+                setMessage({ type: 'error', text: data.error || 'Erreur lors de la suppression groupée' });
+            }
+        } catch (err) {
+            setMessage({ type: 'error', text: 'Erreur réseau' });
+        } finally {
+            setBulkDeleting(false);
+        }
+    };
 
     // Login form if not authenticated
     if (!isAuthenticated) {
@@ -202,18 +260,30 @@ export default function AdminPage() {
         <div className="min-h-screen bg-background text-foreground p-6">
             <div className="max-w-6xl mx-auto">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-bold">🛠️ Admin Panel</h1>
                         <p className="text-muted-foreground">Gérer les images des articles</p>
                     </div>
-                    <button
-                        onClick={fetchArticles}
-                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                    >
-                        <RefreshCw className="w-4 h-4" />
-                        Actualiser
-                    </button>
+                    <div className="flex items-center gap-3">
+                        {selectedArticles.size > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={bulkDeleting}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                            >
+                                {bulkDeleting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                Supprimer ({selectedArticles.size})
+                            </button>
+                        )}
+                        <button
+                            onClick={fetchArticles}
+                            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                            <RefreshCw className="w-4 h-4" />
+                            Actualiser
+                        </button>
+                    </div>
                 </div>
 
                 {/* Message */}
@@ -253,20 +323,37 @@ export default function AdminPage() {
                     </div>
                 </div>
 
-                {/* Tabs */}
-                <div className="flex gap-2 mb-6">
-                    <button
-                        onClick={() => setActiveTab('without')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'without' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}
-                    >
-                        Sans Images ({articlesWithoutImages.length})
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('with')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'with' ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}
-                    >
-                        Avec Images ({articlesWithImages.length})
-                    </button>
+                {/* Tabs & Selection */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => { setActiveTab('without'); setSelectedArticles(new Set()); }}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'without' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}
+                        >
+                            Sans Images ({articlesWithoutImages.length})
+                        </button>
+                        <button
+                            onClick={() => { setActiveTab('with'); setSelectedArticles(new Set()); }}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'with' ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-card border border-border text-muted-foreground hover:text-foreground'}`}
+                        >
+                            Avec Images ({articlesWithImages.length})
+                        </button>
+                    </div>
+
+                    {displayedArticles.length > 0 && (
+                        <div className="flex items-center gap-2 bg-card px-4 py-2 rounded-lg border border-border">
+                            <input
+                                type="checkbox"
+                                id="selectAll"
+                                checked={selectedArticles.size === displayedArticles.length && displayedArticles.length > 0}
+                                onChange={toggleSelectAll}
+                                className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                            />
+                            <label htmlFor="selectAll" className="text-sm font-medium cursor-pointer select-none">
+                                Tout sélectionner
+                            </label>
+                        </div>
+                    )}
                 </div>
 
                 {/* Articles List */}
@@ -280,7 +367,18 @@ export default function AdminPage() {
                     ) : (
                         <div className="space-y-4">
                             {displayedArticles.map(article => (
-                                <div key={article.id} className="bg-card border border-border rounded-xl p-4 flex flex-col md:flex-row md:items-center gap-4">
+                                <div key={article.id} className={`bg-card border ${selectedArticles.has(article.id) ? 'border-primary ring-1 ring-primary' : 'border-border'} rounded-xl p-4 flex flex-col md:flex-row md:items-center gap-4 transition-all`}>
+
+                                    {/* Selection Checkbox */}
+                                    <div className="flex-shrink-0">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedArticles.has(article.id)}
+                                            onChange={() => toggleSelect(article.id)}
+                                            className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                                        />
+                                    </div>
+
                                     {/* Thumbnail for articles with images */}
                                     {activeTab === 'with' && article.image_url && (
                                         <div className="w-20 h-20 rounded-lg overflow-hidden bg-muted flex-shrink-0">
@@ -288,15 +386,15 @@ export default function AdminPage() {
                                         </div>
                                     )}
 
-                                    <div className="flex-1">
+                                    <div className="flex-1 min-w-0">
                                         <p className="text-xs text-accent font-semibold mb-1">{article.source}</p>
-                                        <h3 className="font-medium line-clamp-2">{article.title}</h3>
+                                        <h3 className="font-medium line-clamp-2" title={article.title}>{article.title}</h3>
                                         <p className="text-xs text-muted-foreground mt-1" suppressHydrationWarning>
                                             {new Date(article.created_at).toLocaleDateString()}
                                         </p>
                                     </div>
 
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <a
                                             href={article.link}
                                             target="_blank"
@@ -316,7 +414,7 @@ export default function AdminPage() {
                                             ) : (
                                                 <Upload className="w-4 h-4" />
                                             )}
-                                            <span>{activeTab === 'with' ? 'Remplacer' : 'Upload'}</span>
+                                            <span className="hidden sm:inline">{activeTab === 'with' ? 'Remplacer' : 'Upload'}</span>
                                             <input
                                                 type="file"
                                                 accept="image/*"
