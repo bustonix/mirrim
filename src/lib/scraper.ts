@@ -1,5 +1,6 @@
 import Parser from 'rss-parser';
 import * as cheerio from 'cheerio';
+import { extractArticleImage } from './imageExtractor';
 
 export interface Article {
     title: string;
@@ -166,22 +167,44 @@ async function scrapeAMI(language: 'fr' | 'ar'): Promise<Article[]> {
     if (!$) return [];
 
     const articles: Article[] = [];
+    const articleLinks: string[] = [];
+
     // AMI uses .item-inner containing h2 > a
     $('.item-inner').each((i, el) => {
         if (i > 10) return; // Limit to 10 latest
         const titleEl = $(el).find('h2 a');
         if (titleEl.length) {
+            const link = titleEl.attr('href') || '#';
+            articleLinks.push(link);
             articles.push({
                 title: titleEl.text().trim(),
-                link: titleEl.attr('href') || '#',
+                link: link,
                 source: 'AMI',
                 language: language,
-                pubDate: new Date().toISOString(), // No date in list view easily found
+                pubDate: new Date().toISOString(),
                 excerpt: 'Agence Mauritanienne d\'Information - Officiel',
-                imageUrl: 'https://ami.mr/fr/wp-content/uploads/2022/07/logo-fr01.png' // Use logo as placeholder due to lazy loading complexity
+                imageUrl: undefined // Will be populated below
             });
         }
     });
+
+    // Extract images for each article (with rate limiting)
+    for (let i = 0; i < articles.length; i++) {
+        try {
+            const extraction = await extractArticleImage(articles[i].link);
+            if (extraction.imageUrl) {
+                articles[i].imageUrl = extraction.imageUrl;
+                console.log(`[AMI] ✅ Image extracted (${extraction.method}): ${articles[i].title.slice(0, 40)}...`);
+            } else {
+                console.log(`[AMI] ❌ No image found: ${articles[i].title.slice(0, 40)}...`);
+            }
+        } catch (err) {
+            console.log(`[AMI] Error extracting image for ${articles[i].link}`);
+        }
+        // Rate limiting between requests
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
     return articles;
 }
 
