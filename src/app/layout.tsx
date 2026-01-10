@@ -22,6 +22,10 @@ export const metadata: Metadata = {
     type: "website",
     locale: "fr_FR",
   },
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
