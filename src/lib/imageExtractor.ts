@@ -54,6 +54,70 @@ function isValidImageUrl(url: string | undefined | null): boolean {
 }
 
 /**
+ * Le Calame (Drupal) specific extraction
+ * Priority: Original files > Style derivatives > Link hrefs
+ */
+function extractLeCalameImage($: cheerio.CheerioAPI, articleUrl: string): string | null {
+    const LE_CALAME_PATTERN = /lecalame\.info\/sites\/default\/files\//i;
+    const EXCLUDE_PATTERNS = /logo|icon|avatar|banner|ads|pub|thumb-icon/i;
+
+    // Collect all candidate images from article container
+    const candidates: { url: string; priority: number; position: number }[] = [];
+
+    // Main content selectors for Drupal
+    const containerSelectors = [
+        '#block-system-main',
+        '.node-content',
+        '.field-name-body',
+        'article',
+        '.content',
+        'main',
+    ];
+
+    let containerSelector = 'body';
+    for (const selector of containerSelectors) {
+        if ($(selector).length > 0) {
+            containerSelector = selector;
+            break;
+        }
+    }
+    const $container = $(containerSelector);
+
+    // Strategy 1: Find <img> tags in container
+    $container.find('img').each((index, el) => {
+        const src = $(el).attr('src') || $(el).attr('data-src');
+        if (src && LE_CALAME_PATTERN.test(src) && !EXCLUDE_PATTERNS.test(src)) {
+            // Priority 1: Original (no /styles/)
+            // Priority 2: Derivative (/styles/)
+            const priority = src.includes('/styles/') ? 2 : 1;
+            candidates.push({ url: src, priority, position: index });
+        }
+    });
+
+    // Strategy 2: Find <a href> links to images in container
+    $container.find('a[href]').each((index, el) => {
+        const href = $(el).attr('href');
+        if (href && LE_CALAME_PATTERN.test(href) && IMAGE_EXTENSIONS.test(href) && !EXCLUDE_PATTERNS.test(href)) {
+            const priority = href.includes('/styles/') ? 3 : 2; // Lower priority than img tags
+            candidates.push({ url: href, priority, position: index + 100 }); // +100 to deprioritize vs img
+        }
+    });
+
+    // Sort by priority (lower is better), then by position (first is better)
+    candidates.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.position - b.position;
+    });
+
+    // Return best candidate
+    if (candidates.length > 0) {
+        return candidates[0].url;
+    }
+
+    return null;
+}
+
+/**
  * Extract article image from a page URL
  * Uses a robust fallback strategy
  */
@@ -85,6 +149,19 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
 
         const html = await response.text();
         const $ = cheerio.load(html);
+
+        // ============================================================
+        // LE CALAME (Drupal) - Special handling for lecalame.info
+        // ============================================================
+        if (articleUrl.includes('lecalame.info')) {
+            const leCalameResult = extractLeCalameImage($, articleUrl);
+            if (leCalameResult) {
+                result.imageUrl = leCalameResult;
+                result.method = 'article-img';
+                console.log(`[ImageExtractor] Le Calame: ${leCalameResult}`);
+                return result;
+            }
+        }
 
         // === PRIORITY 1: WordPress Featured Image (Kassataya, etc.) ===
         const featuredImageSelectors = [

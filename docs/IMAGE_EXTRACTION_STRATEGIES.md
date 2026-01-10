@@ -42,18 +42,25 @@ Update this file as you discover new patterns.
 
 ---
 
-## ⏳ Le Calame
+## ✅ Le Calame
 
-**URLs**: `lecalame.info`
+**URLs**: `lecalame.info/?q=node/...`
+
+**Type**: Drupal (not WordPress)
 
 | Strategy | Priority | Reliability | Notes |
 |----------|----------|-------------|-------|
-| `og:image` meta tag | 1 | ❓ | To be tested |
-| Article image | 2 | ❓ | To be tested |
+| `/sites/default/files/` (original) | 1 | ✅ 100% | Original image, no `/styles/` |
+| `/sites/default/files/styles/` | 2 | ⚠️ 90% | Derivative/resized version |
+| `<a href="...jpg">Image</a>` link | 3 | ⚠️ 80% | Fallback when no `<img>` |
 
-**Key selector**: `TODO`
+**Key rules**:
+1. **Isolate article container** - `#block-system-main` or main content block
+2. **Filter by URL pattern** - Only keep `lecalame.info/sites/default/files/`
+3. **Prioritize original** - URLs without `/styles/` over derivatives
+4. **Exclude parasites** - Skip URLs with `logo|icon|avatar|banner|ads|pub`
 
-**Implemented**: ❌ Not yet
+**Implemented**: ✅ Yes (in `imageExtractor.ts`)
 
 ---
 
