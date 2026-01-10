@@ -86,7 +86,38 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
         const html = await response.text();
         const $ = cheerio.load(html);
 
-        // Strategy 1: og:image meta tag
+        // === PRIORITY 1: WordPress Featured Image (Kassataya, etc.) ===
+        const featuredImageSelectors = [
+            'figure.wp-block-post-featured-image img',
+            'figure.post-thumbnail img',
+            'div.post-thumbnail img',
+            '.featured-image img',
+            '.post-featured-image img',
+        ];
+
+        for (const selector of featuredImageSelectors) {
+            const img = $(selector).first();
+            const src = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src');
+            if (isValidImageUrl(src)) {
+                result.imageUrl = src!;
+                result.method = 'article-img';
+                console.log(`[ImageExtractor] Found via featured-image: ${selector}`);
+                return result;
+            }
+        }
+
+        // === PRIORITY 2: wp-content/uploads link (WordPress sites) ===
+        const wpLinks = $('a[href*="/wp-content/uploads/"]').toArray();
+        for (const link of wpLinks) {
+            const href = $(link).attr('href');
+            if (href && IMAGE_EXTENSIONS.test(href) && isValidImageUrl(href)) {
+                result.imageUrl = href;
+                result.method = 'wp-content';
+                return result;
+            }
+        }
+
+        // === PRIORITY 3: og:image meta tag (fallback) ===
         const ogImage = $('meta[property="og:image"]').attr('content');
         if (isValidImageUrl(ogImage)) {
             result.imageUrl = ogImage!;
@@ -103,18 +134,7 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
             return result;
         }
 
-        // Strategy 3: wp-content/uploads link (for WordPress sites like AMI)
-        const wpLinks = $('a[href*="/wp-content/uploads/"]').toArray();
-        for (const link of wpLinks) {
-            const href = $(link).attr('href');
-            if (href && IMAGE_EXTENSIONS.test(href) && isValidImageUrl(href)) {
-                result.imageUrl = href;
-                result.method = 'wp-content';
-                return result;
-            }
-        }
-
-        // Strategy 4: First image in article content
+        // === PRIORITY 5: First image in article content ===
         const articleSelectors = [
             '.post-thumbnail img',
             'article img',
