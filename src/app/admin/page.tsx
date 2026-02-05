@@ -31,6 +31,14 @@ export default function AdminPage() {
     const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
     const [bulkDeleting, setBulkDeleting] = useState(false);
 
+    // Confirmation state
+    const [confirmAction, setConfirmAction] = useState<{
+        type: 'delete-article' | 'delete-image' | 'bulk-delete';
+        id?: string;
+        title?: string;
+        count?: number;
+    } | null>(null);
+
     const handleLogin = (e: React.FormEvent) => {
         e.preventDefault();
         if (passwordInput === ADMIN_PASSWORD) {
@@ -99,64 +107,98 @@ export default function AdminPage() {
         }
     };
 
-    const handleDeleteImage = async (articleId: string) => {
-        if (!confirm("Supprimer cette image ? L'article reviendra dans la liste 'Sans images'.")) return;
-
-        setDeleting(articleId);
-        setMessage(null);
-
-        try {
-            const res = await fetch('/api/admin/delete-image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ articleId })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                setMessage({ type: 'success', text: 'Image supprimée!' });
-                setArticles(prev => prev.map(a =>
-                    a.id === articleId ? { ...a, image_url: null } : a
-                ));
-            } else {
-                setMessage({ type: 'error', text: data.error || 'Erreur lors de la suppression' });
-            }
-        } catch (err) {
-            setMessage({ type: 'error', text: 'Erreur réseau' });
-        } finally {
-            setDeleting(null);
-        }
+    const confirmDeleteImage = (articleId: string) => {
+        setConfirmAction({ type: 'delete-image', id: articleId });
     };
 
-    const handleDeleteArticle = async (articleId: string, title: string) => {
-        if (!confirm(`Supprimer définitivement cet article ?\n\n"${title.substring(0, 50)}..."\n\nCette action est irréversible.`)) return;
+    const confirmDeleteArticle = (articleId: string, title: string) => {
+        setConfirmAction({ type: 'delete-article', id: articleId, title });
+    };
 
-        setDeleting(articleId);
+    const confirmBulkDelete = () => {
+        if (selectedArticles.size === 0) return;
+        setConfirmAction({ type: 'bulk-delete', count: selectedArticles.size });
+    };
+
+    const executeAction = async () => {
+        if (!confirmAction) return;
+
+        const action = confirmAction;
+        setConfirmAction(null); // Close modal
         setMessage(null);
 
-        try {
-            const res = await fetch('/api/admin/delete-article', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ articleId })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                setMessage({ type: 'success', text: 'Article supprimé!' });
-                setArticles(prev => prev.filter(a => a.id !== articleId));
-                setSelectedArticles(prev => {
-                    const next = new Set(prev);
-                    next.delete(articleId);
-                    return next;
+        // Execute Logic based on type
+        if (action.type === 'delete-image' && action.id) {
+            setDeleting(action.id);
+            try {
+                const res = await fetch('/api/admin/delete-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ articleId: action.id })
                 });
-            } else {
-                setMessage({ type: 'error', text: data.error || 'Erreur lors de la suppression' });
+                const data = await res.json();
+                if (data.success) {
+                    setMessage({ type: 'success', text: 'Image supprimée!' });
+                    setArticles(prev => prev.map(a =>
+                        a.id === action.id ? { ...a, image_url: null } : a
+                    ));
+                } else {
+                    setMessage({ type: 'error', text: data.error || 'Erreur suppression' });
+                }
+            } catch (err) {
+                setMessage({ type: 'error', text: 'Erreur réseau' });
+            } finally {
+                setDeleting(null);
             }
-        } catch (err) {
-            setMessage({ type: 'error', text: 'Erreur réseau' });
-        } finally {
-            setDeleting(null);
+        }
+        else if (action.type === 'delete-article' && action.id) {
+            setDeleting(action.id);
+            try {
+                const res = await fetch('/api/admin/delete-article', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ articleId: action.id })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    setMessage({ type: 'success', text: 'Article supprimé!' });
+                    setArticles(prev => prev.filter(a => a.id !== action.id));
+                    // Update selection if needed
+                    if (selectedArticles.has(action.id!)) {
+                        const next = new Set(selectedArticles);
+                        next.delete(action.id!);
+                        setSelectedArticles(next);
+                    }
+                } else {
+                    setMessage({ type: 'error', text: data.error || 'Erreur suppression' });
+                }
+            } catch (err) {
+                setMessage({ type: 'error', text: 'Erreur réseau' });
+            } finally {
+                setDeleting(null);
+            }
+        }
+        else if (action.type === 'bulk-delete') {
+            setBulkDeleting(true);
+            try {
+                const res = await fetch('/api/admin/bulk-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ articleIds: Array.from(selectedArticles) })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    setMessage({ type: 'success', text: `${data.count} articles supprimés!` });
+                    setArticles(prev => prev.filter(a => !selectedArticles.has(a.id)));
+                    setSelectedArticles(new Set());
+                } else {
+                    setMessage({ type: 'error', text: data.error || 'Erreur suppression groupée' });
+                }
+            } catch (err) {
+                setMessage({ type: 'error', text: 'Erreur réseau' });
+            } finally {
+                setBulkDeleting(false);
+            }
         }
     };
 
@@ -188,35 +230,6 @@ export default function AdminPage() {
             newSelected.add(id);
         }
         setSelectedArticles(newSelected);
-    };
-
-    const handleBulkDelete = async () => {
-        if (selectedArticles.size === 0) return;
-        if (!confirm(`Supprimer définitivement ces ${selectedArticles.size} articles ?`)) return;
-
-        setBulkDeleting(true);
-        setMessage(null);
-
-        try {
-            const res = await fetch('/api/admin/bulk-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ articleIds: Array.from(selectedArticles) })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                setMessage({ type: 'success', text: `${selectedArticles.size} articles supprimés avec succès!` });
-                setArticles(prev => prev.filter(a => !selectedArticles.has(a.id)));
-                setSelectedArticles(new Set());
-            } else {
-                setMessage({ type: 'error', text: data.error || 'Erreur lors de la suppression groupée' });
-            }
-        } catch (err) {
-            setMessage({ type: 'error', text: 'Erreur réseau' });
-        } finally {
-            setBulkDeleting(false);
-        }
     };
 
     // Login form if not authenticated
@@ -268,7 +281,7 @@ export default function AdminPage() {
                     <div className="flex items-center gap-3">
                         {selectedArticles.size > 0 && (
                             <button
-                                onClick={handleBulkDelete}
+                                onClick={confirmBulkDelete}
                                 disabled={bulkDeleting}
                                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                             >
@@ -430,7 +443,7 @@ export default function AdminPage() {
                                         {/* Delete Image Button (only for articles with images) */}
                                         {activeTab === 'with' && (
                                             <button
-                                                onClick={() => handleDeleteImage(article.id)}
+                                                onClick={() => confirmDeleteImage(article.id)}
                                                 disabled={deleting === article.id}
                                                 className="flex items-center gap-2 px-4 py-2 bg-orange-500/20 text-orange-400 border border-orange-500/50 rounded-lg hover:bg-orange-500/30 transition-colors"
                                                 title="Supprimer l'image"
@@ -446,7 +459,7 @@ export default function AdminPage() {
 
                                         {/* Delete Article Button */}
                                         <button
-                                            onClick={() => handleDeleteArticle(article.id, article.title)}
+                                            onClick={() => confirmDeleteArticle(article.id, article.title)}
                                             disabled={deleting === article.id}
                                             className="flex items-center gap-2 px-3 py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-lg hover:bg-red-500/30 transition-colors"
                                             title="Supprimer l'article"
@@ -463,6 +476,34 @@ export default function AdminPage() {
                         </div>
                     )}
                 </div>
+
+                {/* Custom Confirmation Modal */}
+                {confirmAction && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-card w-full max-w-md rounded-xl p-6 border border-border shadow-xl">
+                            <h3 className="text-xl font-bold mb-4">Confirmer l'action</h3>
+                            <p className="text-muted-foreground mb-6">
+                                {confirmAction.type === 'bulk-delete' && `Êtes-vous sûr de vouloir supprimer définitivement ces ${confirmAction.count} articles ?`}
+                                {confirmAction.type === 'delete-article' && `Supprimer l'article "${confirmAction.title?.substring(0, 40)}..." ?`}
+                                {confirmAction.type === 'delete-image' && "Supprimer l'image de cet article ?"}
+                            </p>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setConfirmAction(null)}
+                                    className="px-4 py-2 rounded-lg hover:bg-muted transition-colors"
+                                >
+                                    Annuler
+                                </button>
+                                <button
+                                    onClick={executeAction}
+                                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                                >
+                                    Confirmer
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div >
     );
