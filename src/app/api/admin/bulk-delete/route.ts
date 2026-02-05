@@ -12,50 +12,62 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 1. Get image URLs for these articles to delete from storage
-        const { data: articles, error: fetchError } = await supabaseAdmin
-            .from('articles')
-            .select('image_url')
-            .in('id', articleIds);
+        const BATCH_SIZE = 50;
+        let deletedCount = 0;
 
-        if (fetchError) {
-            console.error('Error fetching articles for bulk delete:', fetchError);
-            // Continue to try deleting records even if fetch fails? Better to fail safely.
-        }
+        // Process in batches to avoid timeouts and query limits
+        for (let i = 0; i < articleIds.length; i += BATCH_SIZE) {
+            const batchIds = articleIds.slice(i, i + BATCH_SIZE);
 
-        // 2. Delete images from storage
-        const filesToDelete: string[] = [];
-        articles?.forEach(article => {
-            if (article.image_url && article.image_url.includes('supabase')) {
-                const filename = article.image_url.split('/').pop();
-                if (filename) filesToDelete.push(filename);
+            // 1. Get image URLs for this batch
+            const { data: articles, error: fetchError } = await supabaseAdmin
+                .from('articles')
+                .select('image_url')
+                .in('id', batchIds);
+
+            if (fetchError) {
+                console.error(`Error fetching batch ${i}:`, fetchError);
+                continue; // Try next batch? or abort? Continuing is safer for partial progress
             }
-        });
 
-        if (filesToDelete.length > 0) {
-            await supabaseAdmin.storage
-                .from('news-images')
-                .remove(filesToDelete);
+            // 2. Delete images from storage (if any)
+            const filesToDelete: string[] = [];
+            articles?.forEach(article => {
+                if (article.image_url && article.image_url.includes('supabase')) {
+                    const filename = article.image_url.split('/').pop();
+                    if (filename) filesToDelete.push(filename);
+                }
+            });
+
+            if (filesToDelete.length > 0) {
+                await supabaseAdmin.storage
+                    .from('news-images')
+                    .remove(filesToDelete);
+            }
+
+            // 3. Delete articles from database
+            const { error: deleteError } = await supabaseAdmin
+                .from('articles')
+                .delete()
+                .in('id', batchIds);
+
+            if (deleteError) {
+                console.error(`Error deleting batch ${i}:`, deleteError);
+                // Return error immediately if a delete fails, to notify user
+                return NextResponse.json(
+                    { success: false, error: `Failed at index ${i}: ${deleteError.message}` },
+                    { status: 500 }
+                );
+            }
+
+            deletedCount += batchIds.length;
         }
 
-        // 3. Delete articles from database
-        const { error: deleteError } = await supabaseAdmin
-            .from('articles')
-            .delete()
-            .in('id', articleIds);
-
-        if (deleteError) {
-            return NextResponse.json(
-                { success: false, error: deleteError.message },
-                { status: 500 }
-            );
-        }
-
-        return NextResponse.json({ success: true, count: articleIds.length });
+        return NextResponse.json({ success: true, count: deletedCount });
     } catch (err) {
         console.error('Bulk delete error:', err);
         return NextResponse.json(
-            { success: false, error: 'Server error' },
+            { success: false, error: 'Server error: ' + (err as Error).message },
             { status: 500 }
         );
     }

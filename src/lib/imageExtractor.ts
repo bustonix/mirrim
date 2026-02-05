@@ -33,8 +33,11 @@ interface ExtractionResult {
 /**
  * Validate if a URL is a valid article image
  */
+/**
+ * Validate if a URL is a valid article image
+ */
 function isValidImageUrl(url: string | undefined | null): boolean {
-    if (!url || url.length < 20) return false;
+    if (!url || url.length < 10) return false;
 
     // Check for invalid patterns
     const lowerUrl = url.toLowerCase();
@@ -45,76 +48,14 @@ function isValidImageUrl(url: string | undefined | null): boolean {
     // Must have image extension or be from known image CDNs
     if (!IMAGE_EXTENSIONS.test(url)) {
         // Allow some CDN URLs without extensions
-        if (!url.includes('cloudinary.com') && !url.includes('wp-content/uploads')) {
+        if (!url.includes('cloudinary.com') &&
+            !url.includes('wp-content/uploads') &&
+            !url.includes('googleusercontent.com')) {
             return false;
         }
     }
 
     return true;
-}
-
-/**
- * Le Calame (Drupal) specific extraction
- * Priority: Original files > Style derivatives > Link hrefs
- */
-function extractLeCalameImage($: cheerio.CheerioAPI, articleUrl: string): string | null {
-    const LE_CALAME_PATTERN = /lecalame\.info\/sites\/default\/files\//i;
-    const EXCLUDE_PATTERNS = /logo|icon|avatar|banner|ads|pub|thumb-icon/i;
-
-    // Collect all candidate images from article container
-    const candidates: { url: string; priority: number; position: number }[] = [];
-
-    // Main content selectors for Drupal
-    const containerSelectors = [
-        '#block-system-main',
-        '.node-content',
-        '.field-name-body',
-        'article',
-        '.content',
-        'main',
-    ];
-
-    let containerSelector = 'body';
-    for (const selector of containerSelectors) {
-        if ($(selector).length > 0) {
-            containerSelector = selector;
-            break;
-        }
-    }
-    const $container = $(containerSelector);
-
-    // Strategy 1: Find <img> tags in container
-    $container.find('img').each((index, el) => {
-        const src = $(el).attr('src') || $(el).attr('data-src');
-        if (src && LE_CALAME_PATTERN.test(src) && !EXCLUDE_PATTERNS.test(src)) {
-            // Priority 1: Original (no /styles/)
-            // Priority 2: Derivative (/styles/)
-            const priority = src.includes('/styles/') ? 2 : 1;
-            candidates.push({ url: src, priority, position: index });
-        }
-    });
-
-    // Strategy 2: Find <a href> links to images in container
-    $container.find('a[href]').each((index, el) => {
-        const href = $(el).attr('href');
-        if (href && LE_CALAME_PATTERN.test(href) && IMAGE_EXTENSIONS.test(href) && !EXCLUDE_PATTERNS.test(href)) {
-            const priority = href.includes('/styles/') ? 3 : 2; // Lower priority than img tags
-            candidates.push({ url: href, priority, position: index + 100 }); // +100 to deprioritize vs img
-        }
-    });
-
-    // Sort by priority (lower is better), then by position (first is better)
-    candidates.sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        return a.position - b.position;
-    });
-
-    // Return best candidate
-    if (candidates.length > 0) {
-        return candidates[0].url;
-    }
-
-    return null;
 }
 
 /**
@@ -129,13 +70,13 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
 
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+        const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
         const response = await fetch(articleUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml',
-                'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8,ar;q=0.7',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7,ar;q=0.6',
             },
             signal: controller.signal,
         });
@@ -151,50 +92,94 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
         const $ = cheerio.load(html);
 
         // ============================================================
-        // LE CALAME (Drupal) - Special handling for lecalame.info
+        // PLATFORM SPECIFIC LOGIC (Based on browser inspection)
         // ============================================================
-        if (articleUrl.includes('lecalame.info')) {
-            const leCalameResult = extractLeCalameImage($, articleUrl);
-            if (leCalameResult) {
-                result.imageUrl = leCalameResult;
+
+        // --- CRIDEM ---
+        if (articleUrl.includes('cridem.org')) {
+            // Priority 1: Main article photo (img.focus-photo which is inside div#article)
+            const focusPhoto = $('img.focus-photo').attr('src');
+            if (focusPhoto) {
+                result.imageUrl = focusPhoto.startsWith('http') ? focusPhoto : `http://cridem.org/${focusPhoto}`;
                 result.method = 'article-img';
-                console.log(`[ImageExtractor] Le Calame: ${leCalameResult}`);
                 return result;
             }
         }
 
-        // === PRIORITY 1: WordPress Featured Image (Kassataya, etc.) ===
-        const featuredImageSelectors = [
-            'figure.wp-block-post-featured-image img',
-            'figure.post-thumbnail img',
-            'div.post-thumbnail img',
-            '.featured-image img',
-            '.post-featured-image img',
-        ];
+        // --- AMI (ami.mr) ---
+        if (articleUrl.includes('ami.mr')) {
+            // Priority 1: High res image from parent anchor of thumbnail
+            const thumbnailLink = $('a.post-thumbnail').attr('href');
+            if (isValidImageUrl(thumbnailLink)) {
+                result.imageUrl = thumbnailLink!;
+                result.method = 'article-img';
+                return result;
+            }
 
-        for (const selector of featuredImageSelectors) {
-            const img = $(selector).first();
-            const src = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src');
+            // Priority 2: Thumbnail image (check data-src first for lazy load)
+            const thumbImg = $('a.post-thumbnail img');
+            const thumbSrc = thumbImg.attr('data-src') || thumbImg.attr('src');
+            if (isValidImageUrl(thumbSrc)) {
+                result.imageUrl = thumbSrc!;
+                result.method = 'article-img';
+                return result;
+            }
+        }
+
+        // --- LE CALAME ---
+        if (articleUrl.includes('lecalame.info')) {
+            // Selector: .field-items .field-item img
+            // Often inside .field-name-body or main content
+            const mainImg = $('.field-item img, .node-content img').first();
+            const src = mainImg.attr('src');
             if (isValidImageUrl(src)) {
                 result.imageUrl = src!;
                 result.method = 'article-img';
-                console.log(`[ImageExtractor] Found via featured-image: ${selector}`);
                 return result;
             }
         }
 
-        // === PRIORITY 2: wp-content/uploads link (WordPress sites) ===
-        const wpLinks = $('a[href*="/wp-content/uploads/"]').toArray();
-        for (const link of wpLinks) {
-            const href = $(link).attr('href');
-            if (href && IMAGE_EXTENSIONS.test(href) && isValidImageUrl(href)) {
-                result.imageUrl = href;
-                result.method = 'wp-content';
+        // --- ESSAHRAA (FR & AR) ---
+        if (articleUrl.includes('essahraa.net')) {
+            // Selector: .field-name-field-image img
+            const mainImg = $('.field-name-field-image img, .field-item span.caption img').first();
+            const src = mainImg.attr('src');
+            if (isValidImageUrl(src)) {
+                result.imageUrl = src!;
+                result.method = 'article-img';
                 return result;
             }
         }
 
-        // === PRIORITY 3: og:image meta tag (fallback) ===
+        // --- ALAFKHAR (AR) ---
+        if (articleUrl.includes('alakhbar.info')) {
+            // Selector: .field-name-field-image img (Drupal)
+            const mainImg = $('.field-name-field-image img, .field-type-image img').first();
+            const src = mainImg.attr('src');
+            if (isValidImageUrl(src)) {
+                result.imageUrl = src!;
+                result.method = 'article-img';
+                return result;
+            }
+        }
+
+        // --- SAHARA MEDIAS (AR) ---
+        if (articleUrl.includes('saharamedias.net')) {
+            // WordPress: .featured img (found in inspection), .featured-image img
+            const mainImg = $('.featured img, .featured-image img, .post-thumbnail img, .entry-content img').first();
+            const src = mainImg.attr('src') || mainImg.attr('data-src');
+            if (isValidImageUrl(src)) {
+                result.imageUrl = src!;
+                result.method = 'article-img';
+                return result;
+            }
+        }
+
+        // ============================================================
+        // GENERIC FALLBACKS
+        // ============================================================
+
+        // === PRIORITY 1: OpenGraph Image (High Quality) ===
         const ogImage = $('meta[property="og:image"]').attr('content');
         if (isValidImageUrl(ogImage)) {
             result.imageUrl = ogImage!;
@@ -202,7 +187,7 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
             return result;
         }
 
-        // Strategy 2: twitter:image meta tag
+        // === PRIORITY 2: Twitter Image ===
         const twitterImage = $('meta[name="twitter:image"]').attr('content')
             || $('meta[property="twitter:image"]').attr('content');
         if (isValidImageUrl(twitterImage)) {
@@ -211,22 +196,28 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
             return result;
         }
 
-        // === PRIORITY 5: First image in article content ===
-        const articleSelectors = [
-            '.post-thumbnail img',
+        // === PRIORITY 3: Content Heuristics ===
+        const contentSelectors = [
             'article img',
-            '.entry-content img',
-            '.post-content img',
-            '.article-content img',
-            '.content img',
             'main img',
+            '.post-content img',
+            '.entry-content img',
+            '#article img'
         ];
 
-        for (const selector of articleSelectors) {
+        for (const selector of contentSelectors) {
             const img = $(selector).first();
-            const src = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src');
+            const src = img.attr('src') || img.attr('data-src');
+
+            // Resolve relative URLs if needed, though most modern setups use absolute
             if (isValidImageUrl(src)) {
-                result.imageUrl = src!;
+                // Basic relative URL handling
+                if (src && !src.startsWith('http')) {
+                    const urlObj = new URL(articleUrl);
+                    result.imageUrl = new URL(src, urlObj.origin).toString();
+                } else {
+                    result.imageUrl = src!;
+                }
                 result.method = 'article-img';
                 return result;
             }
