@@ -139,6 +139,18 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
             }
         }
 
+        // --- KASSATAYA ---
+        if (articleUrl.includes('kassataya.com')) {
+            // Selector: .single-featured-image img
+            const mainImg = $('.single-featured-image img').first();
+            const src = mainImg.attr('src');
+            if (isValidImageUrl(src)) {
+                result.imageUrl = src!;
+                result.method = 'article-img';
+                return result;
+            }
+        }
+
         // --- ESSAHRAA (FR & AR) ---
         if (articleUrl.includes('essahraa.net')) {
             // Selector: .field-name-field-image img
