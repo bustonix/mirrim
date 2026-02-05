@@ -128,9 +128,9 @@ export async function extractArticleImage(articleUrl: string): Promise<Extractio
 
         // --- LE CALAME ---
         if (articleUrl.includes('lecalame.info')) {
-            // Selector: .field-items .field-item img
-            // Often inside .field-name-body or main content
-            const mainImg = $('.field-item img, .node-content img').first();
+            // User provided selector: article.content.clearfix
+            // Combining with previous ones just in case
+            const mainImg = $('article.content.clearfix img, .field-item img, .node-content img').first();
             const src = mainImg.attr('src');
             if (isValidImageUrl(src)) {
                 result.imageUrl = src!;
